@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+
+// assume both position and normal are in homogeneous form
+
+attribute vec4 vPosition, vNormal;
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform vec4 lightDiffuse, lightSpecular, lightAmbient;
+uniform vec4 materialDiffuse, materialSpecular, materialAmbient;
+uniform float shininess;
+varying vec4 fColor;
+uniform vec4 lightPosition;
+
+void main()
+{
+    //Diffuse
+    //Calculate L
+    vec4 nm = vNormal;
+    nm.w = 1.0;     //To calculate the lighting vector, we need to convert the normal position
+    vec3 pos = (modelViewMatrix * nm).xyz;
+    vec3 L = normalize(lightPosition.xyz - pos);
+
+    //Calculate N
+    //Here, we need to convert the normal direction (not the position)
+    vec3 N = normalize(modelViewMatrix * vNormal).xyz;
+
+    //Id = Ld kd dot(l • n)
+    vec4 diffuse = lightDiffuse * materialDiffuse * dot(L, N);
+
+
+    //Specular
+    //V = origin - pos = -pos
+    vec3 V = normalize(-pos);
+
+    //Specular
+    //r = (2 (l · n ) n) - l
+    vec3 R = 2.0 * (dot(L, N) * N) - L;
+
+    //Is = Ls Ks dot(V, R)^a
+    vec4 specular = lightSpecular * materialSpecular * pow(max(dot(V, R), 0.0), shininess);
+
+
+    //Ambient
+    //Ia = Laka
+    vec4 ambient = lightAmbient * materialAmbient;
+
+
+    fColor = diffuse + specular + ambient;
+	fColor.a = 1.0;
+
+    gl_Position = projectionMatrix * modelViewMatrix * vPosition;
+}
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+
+precision mediump float;
+
+varying vec4 fColor;
+
+void main()
+{
+    gl_FragColor = fColor;
+}
+</script>
+
+<script type="text/javascript" src="lib/webgl-utils.js"></script>
+<script type="text/javascript" src="lib/initShaders.js"></script>
+
+<script type="text/javascript" src="lib/MV.js"></script>
+<script type="text/javascript" src="shadedSphere1.js"></script>
+
+<body>
+<canvas id="gl-canvas" width="512" height="512">
+Epic fail!
+</canvas>
+</body>
+</html>
