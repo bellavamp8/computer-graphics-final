@@ -204,18 +204,21 @@ function render() {
     var mvSun = mult(modelViewMatrix, translate(0,0,-50));
     mvSun = mult(mvSun, scalem(5,5,5));
     gl.uniformMatrix4fv(modelViewMatrixLoc,false,flatten(mvSun));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(0.9412, 0.7725, 0.0941, 1.0)));
     for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
 
     // Draw Earth
     var mvEarth = mult(modelViewMatrix, translate(earthX, earthY, earthZ));
     mvEarth = mult(mvEarth, scalem(largeSphereScale, largeSphereScale, largeSphereScale));
     gl.uniformMatrix4fv(modelViewMatrixLoc,false,flatten(mvEarth));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(0.0941, 0.1647, 0.9412, 1.0)));
     for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
 
     // Draw Moon
     var mvMoon = mult(modelViewMatrix, translate(moonX, moonY, moonZ));
     mvMoon = mult(mvMoon, scalem(smallSphereScale, smallSphereScale, smallSphereScale));
     gl.uniformMatrix4fv(modelViewMatrixLoc,false,flatten(mvMoon));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(0.6784, 0.68235, 0.70196, 1.0)));
     for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
 
     requestAnimationFrame(render);
