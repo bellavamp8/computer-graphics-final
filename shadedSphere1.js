@@ -10,7 +10,7 @@ var pointsArray = [];
 var normalsArray = [];
 var texCoordsArray = [];
 
-var texture;
+var earthTexture, moonTexture;
 var useTextureLoc;
 
 // Camera parameters
@@ -35,7 +35,7 @@ var cameraOrbitRadius = 5.0;
 var cameraHeight = 2.0;
 
 // Earth orbit and rotation
-var earthOrbitRadius = 10;
+var earthOrbitRadius = 40;
 var earthOrbitAngle = 0;
 var earthOrbitSpeed = 0.005;
 var earthRotation = 0;
@@ -43,12 +43,12 @@ var earthRotationSpeed = 0.02;
 
 // Material properties
 var materialAmbient = vec4(1.0, 0.0, 1.0, 1.0);
-var materialDiffuse = vec4(1.0, 1.0, 0.0, 1.0);
+var materialDiffuse = vec4(1.0, 1.0, 1.0, 1.0);
 var materialSpecular = vec4(1.0, 1.0, 1.0, 1.0);
 var materialShininess = 20.0;
 
-// Light
-var lightPosition = vec3(10.0, 10.0, 10.0);
+// Light (directional from Sun)
+var lightPosition = vec3(0.0, 0.0, 0.0);
 var lightDiffuse = vec4(0.8, 0.8, 0.8, 1.0);
 var lightSpecular = vec4(1.0, 1.0, 1.0, 1.0);
 var lightAmbient = vec4(0.0, 0.0, 0.0, 1.0);
@@ -71,8 +71,8 @@ var viewMode = "moonOrbit";
 function sphericalTexCoord(v){
     var theta = Math.atan2(v[2], v[0]);
     var phi = Math.acos(v[1]);
-    var u = 1.0 - (theta + Math.PI) / (2 * Math.PI);  // Horizontal flip
-    var t = 1.0 - (phi / Math.PI);                    // Vertical flip (optional)
+    var u = 1.0 - (theta + Math.PI) / (2 * Math.PI);
+    var t = 1.0 - (phi / Math.PI);
     return vec2(u, t);
 }
 
@@ -115,19 +115,19 @@ function tetrahedron(a, b, c, d, n){
 //----------------------------------------------
 // Texture
 //----------------------------------------------
-function configureTexture(image){
-    texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+function configureTexture(image) {
+    var tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
 
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,image);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
 
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    gl.uniform1i(gl.getUniformLocation(program,"tex0"),0);
+    return tex;
 }
 
 //----------------------------------------------
@@ -183,17 +183,27 @@ window.onload = function init(){
     gl.uniform4fv(gl.getUniformLocation(program,"materialSpecular"),flatten(materialSpecular));
     gl.uniform4fv(gl.getUniformLocation(program,"lightAmbient"),flatten(lightAmbient));
     gl.uniform4fv(gl.getUniformLocation(program,"materialAmbient"),flatten(materialAmbient));
+
     gl.uniform4fv(gl.getUniformLocation(program,"lightPosition"),
-                  flatten(vec4(lightPosition[0],lightPosition[1],lightPosition[2],1.0)));
+                  flatten(vec4(lightPosition[0],lightPosition[1],lightPosition[2],0.0)));
     gl.uniform1f(gl.getUniformLocation(program,"shininess"),materialShininess);
 
     // Load Earth texture
-    var image = new Image();
-    image.crossOrigin = "anonymous";
-    image.src = "earthmap1k.bmp"; // Serve via localhost to avoid CORS
-    image.onload = function(){
-        configureTexture(image);
+    var earthImage = new Image();
+    earthImage.crossOrigin = "anonymous";
+    earthImage.src = "earthmap1k.bmp";
+    earthImage.onload = function(){
+        earthTexture = configureTexture(earthImage);
         console.log("Earth texture loaded");
+    };
+
+    // Load Moon texture
+    var moonImage = new Image();
+    moonImage.crossOrigin = "anonymous";
+    moonImage.src = "metal.bmp";
+    moonImage.onload = function(){
+        moonTexture = configureTexture(moonImage);
+        console.log("Moon texture loaded");
     };
 
     // Key controls
@@ -243,39 +253,58 @@ function render(){
         projectionMatrix = ortho(left,right,bottom,ytop,near,far);
     }
     else{
-        eye = vec3(0,10,0);
+        eye = vec3(0,40,0);
         at = vec3(0,0,0);
         up = vec3(0,0,-1);
-        var scale = 25;
+        var scale = 70;
         projectionMatrix = ortho(-scale,scale,-scale,scale,near,far);
     }
 
     modelViewMatrix = lookAt(eye,at,up);
     gl.uniformMatrix4fv(projectionMatrixLoc,false,flatten(projectionMatrix));
 
+    //----------------------------------
     // Sun
+    //----------------------------------
     gl.uniform1i(useTextureLoc,false);
-    var mvSun = mult(modelViewMatrix,translate(0,0,-50));
-    mvSun = mult(mvSun,scalem(5,5,5));
+    var sunScale = 5;
+    var mvSun = mult(modelViewMatrix, translate(lightPosition[0], lightPosition[1], lightPosition[2]));
+    mvSun = mult(mvSun, scalem(sunScale, sunScale, sunScale));
     gl.uniformMatrix4fv(modelViewMatrixLoc,false,flatten(mvSun));
     gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"),flatten(vec4(0.9412,0.7725,0.0941,1)));
     for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
 
-    // Earth (TEXTURED & ROTATING)
-    gl.uniform1i(useTextureLoc,true);
+    //----------------------------------
+    // Earth (TEXTURED)
+    //----------------------------------
+    if(earthTexture){
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, earthTexture);
+        gl.uniform1i(gl.getUniformLocation(program,"tex0"), 0);
+        gl.uniform1i(useTextureLoc,true);
+    }
+
     var mvEarth = mult(modelViewMatrix, translate(earthX, earthY, earthZ));
-    mvEarth = mult(mvEarth, rotateY(earthRotation)); // spin Earth on its axis
+    mvEarth = mult(mvEarth, rotateY(earthRotation));
     mvEarth = mult(mvEarth, scalem(largeSphereScale, largeSphereScale, largeSphereScale));
     gl.uniformMatrix4fv(modelViewMatrixLoc,false,flatten(mvEarth));
-    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(1.0,1.0,1.0,1.0))); // White for true texture colors
+    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(1.0,1.0,1.0,1.0)));
     for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
 
-    // Moon
-    gl.uniform1i(useTextureLoc,false);
+    //----------------------------------
+    // Moon (TEXTURED)
+    //----------------------------------
+    if(moonTexture){
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, moonTexture);
+        gl.uniform1i(gl.getUniformLocation(program,"tex0"), 0);
+        gl.uniform1i(useTextureLoc,true);
+    }
+
     var mvMoon = mult(modelViewMatrix, translate(moonX, moonY, moonZ));
     mvMoon = mult(mvMoon, scalem(smallSphereScale, smallSphereScale, smallSphereScale));
     gl.uniformMatrix4fv(modelViewMatrixLoc,false,flatten(mvMoon));
-    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"),flatten(vec4(0.6784,0.68235,0.70196,1)));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"),flatten(vec4(1.0,1.0,1.0,1.0)));
     for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
 
     requestAnimationFrame(render);

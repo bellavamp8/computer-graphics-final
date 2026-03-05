@@ -3,49 +3,42 @@
 
 <script id="vertex-shader" type="x-shader/x-vertex">
 
-// assume both position and normal are in homogeneous form
-
 attribute vec4 vPosition, vNormal;
 attribute vec2 vTexCoord;
 
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
+uniform vec3 earthPosition;
+
+varying vec4 fColor;
+varying vec2 fTexCoord;
+varying vec3 fReflectDir;
 
 uniform vec4 lightDiffuse, lightSpecular, lightAmbient;
 uniform vec4 materialDiffuse, materialSpecular, materialAmbient;
 uniform float shininess;
-
 uniform vec4 lightPosition;
-
-varying vec4 fColor;
-varying vec2 fTexCoord;
 
 void main()
 {
-    vec4 nm = vNormal;
-    nm.w = 1.0;
+    vec4 posMV = modelViewMatrix * vPosition;
+    vec3 N = normalize(mat3(modelViewMatrix) * vNormal.xyz);
+    vec3 L = normalize(lightPosition.xyz - posMV.xyz);
+    vec3 V = normalize(-posMV.xyz);
 
-    vec3 pos = (modelViewMatrix * nm).xyz;
-    vec3 L = normalize(lightPosition.xyz - pos);
-
-    vec3 N = normalize((modelViewMatrix * vNormal).xyz);
-
+    // Phong shading
     vec4 diffuse = lightDiffuse * materialDiffuse * max(dot(L,N),0.0);
-
-    vec3 V = normalize(-pos);
-    vec3 R = 2.0 * dot(L,N) * N - L;
-
-    vec4 specular = lightSpecular * materialSpecular *
-                    pow(max(dot(V,R),0.0), shininess);
-
+    vec3 R = reflect(-L,N);
+    vec4 specular = lightSpecular * materialSpecular * pow(max(dot(V,R),0.0), shininess);
     vec4 ambient = lightAmbient * materialAmbient;
-
     fColor = diffuse + specular + ambient;
-    fColor.a = 1.0;
+
+    // Reflection vector for Moon only
+    vec3 toEarth = normalize(earthPosition - posMV.xyz);
+    fReflectDir = reflect(-toEarth, N);
 
     fTexCoord = vTexCoord;
-
-    gl_Position = projectionMatrix * modelViewMatrix * vPosition;
+    gl_Position = projectionMatrix * posMV;
 }
 </script>
 
@@ -54,20 +47,31 @@ precision mediump float;
 
 varying vec4 fColor;
 varying vec2 fTexCoord;
+varying vec3 fReflectDir;
 
-uniform sampler2D tex0;
+uniform sampler2D tex0;      // Base texture (Moon, Earth)
+uniform sampler2D earthTex;  // Earth texture for Moon reflection
 uniform bool useTexture;
+uniform bool useReflection;
 
 void main()
 {
-    vec4 texColor = texture2D(tex0, fTexCoord);
+    vec4 baseColor = texture2D(tex0, fTexCoord);
+    vec4 finalColor = baseColor;
 
-    if(useTexture)
-        gl_FragColor = fColor * texColor;
-    else
-        gl_FragColor = fColor;
+    if(useReflection){
+        // Convert reflection vector to spherical coordinates
+        float u = 0.5 + atan(fReflectDir.z, fReflectDir.x) / (2.0 * 3.14159265);
+        float v = 0.5 - asin(fReflectDir.y) / 3.14159265;
+
+        vec4 reflectedColor = texture2D(earthTex, vec2(u,v));
+        finalColor = mix(baseColor, reflectedColor, 0.7); // Mirror effect
+    }
+
+    gl_FragColor = fColor * finalColor;
 }
 </script>
+
 
 <script type="text/javascript" src="lib/webgl-utils.js"></script>
 <script type="text/javascript" src="lib/initShaders.js"></script>
