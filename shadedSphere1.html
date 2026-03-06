@@ -8,11 +8,12 @@ attribute vec2 vTexCoord;
 
 uniform mat4 modelViewMatrix;
 uniform mat4 projectionMatrix;
-uniform vec3 earthPosition;
+uniform mat4 lightMVP;  // Transform from world to light clip space
 
 varying vec4 fColor;
 varying vec2 fTexCoord;
 varying vec3 fReflectDir;
+varying vec4 fPosLightSpace;  // Position in light's clip space for shadow lookup
 
 uniform vec4 lightDiffuse, lightSpecular, lightAmbient;
 uniform vec4 materialDiffuse, materialSpecular, materialAmbient;
@@ -33,9 +34,11 @@ void main()
     vec4 ambient = lightAmbient * materialAmbient;
     fColor = diffuse + specular + ambient;
 
-    // Reflection vector for Moon only
-    vec3 toEarth = normalize(earthPosition - posMV.xyz);
-    fReflectDir = reflect(-toEarth, N);
+    // Reflection vector
+    fReflectDir = vec3(0.0);
+
+    // Position in light clip space for shadow mapping
+    fPosLightSpace = lightMVP * vPosition;
 
     fTexCoord = vTexCoord;
     gl_Position = projectionMatrix * posMV;
@@ -48,31 +51,52 @@ precision mediump float;
 varying vec4 fColor;
 varying vec2 fTexCoord;
 varying vec3 fReflectDir;
+varying vec4 fPosLightSpace;
 
-uniform sampler2D tex0;      // Base texture (Moon, Earth)
-uniform sampler2D earthTex;  // Earth texture for Moon reflection
+uniform sampler2D tex0;
+uniform sampler2D shadowMap;   // Depth texture from sun's POV
 uniform bool useTexture;
 uniform bool useReflection;
+uniform bool receiveShadow;    // Only Earth receives the satellite shadow
+
+float shadowFactor()
+{
+    // Convert from clip space [-1,1] to texture space [0,1]
+    vec3 proj = (fPosLightSpace.xyz / fPosLightSpace.w) * 0.5 + 0.5;
+
+    // Outside the shadow map frustum = no shadow
+    if(proj.x < 0.0 || proj.x > 1.0 || proj.y < 0.0 || proj.y > 1.0) return 1.0;
+
+    float closestDepth = texture2D(shadowMap, proj.xy).r;
+    float currentDepth = proj.z;
+
+    // Small bias to avoid shadow acne
+    float bias = 0.005;
+    return (currentDepth - bias > closestDepth) ? 0.4 : 1.0;
+}
 
 void main()
 {
-    vec4 baseColor;
-    if(useTexture) {
-        baseColor = texture2D(tex0, fTexCoord);
-    } else {
-        baseColor = vec4(0.8, 0.8, 0.8, 1.0); // fallback grey
-    }
+    vec4 baseColor = useTexture ? texture2D(tex0, fTexCoord) : vec4(1.0);
+    float shadow = receiveShadow ? shadowFactor() : 1.0;
+    gl_FragColor = vec4(fColor.rgb * baseColor.rgb * shadow, 1.0);
+}
+</script>
 
-    vec4 finalColor = baseColor;
+<!-- Depth-only pass vertex shader (renders scene from sun's POV) -->
+<script id="depth-vertex-shader" type="x-shader/x-vertex">
+attribute vec4 vPosition;
+uniform mat4 lightMVP;
+void main() {
+    gl_Position = lightMVP * vPosition;
+}
+</script>
 
-    if(useReflection){
-        float u = 0.5 + atan(fReflectDir.z, fReflectDir.x) / (2.0 * 3.14159265);
-        float v = 0.5 - asin(fReflectDir.y) / 3.14159265;
-        vec4 reflectedColor = texture2D(earthTex, vec2(u,v));
-        finalColor = mix(baseColor, reflectedColor, 0.7);
-    }
-
-    gl_FragColor = fColor * finalColor;
+<!-- Depth-only pass fragment shader -->
+<script id="depth-fragment-shader" type="x-shader/x-fragment">
+precision mediump float;
+void main() {
+    gl_FragColor = vec4(gl_FragCoord.z, gl_FragCoord.z, gl_FragCoord.z, 1.0);
 }
 </script>
 

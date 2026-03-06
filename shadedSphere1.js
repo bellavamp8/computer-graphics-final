@@ -38,7 +38,7 @@ var orbitRadius = 8.0;          // Satellite orbit radius
 
 // Broken piece orbital parameters (orbits the satellite)
 var brokenOrbitAngle = 0;
-var brokenOrbitRadius = 0.7;    // Tight orbit around the satellite
+var brokenOrbitRadius = 0.3;    // Tight orbit around the satellite
 var brokenOrbitSpeed = 0.03;    // Faster than satellite orbit
 var brokenScale = 0.05;
 
@@ -79,6 +79,12 @@ var viewMode = "moonOrbit";
 
 // Textures
 var earthTexture, metalTexture;
+
+// Shadow mapping
+var shadowFramebuffer, shadowTexture;
+var depthProgram;
+var SHADOW_SIZE = 1024;
+var lightMVPLoc, lightMVPDepthLoc, receiveShadowLoc, shadowMapLoc;
 
 //----------------------------------------------
 // Geometry
@@ -227,6 +233,33 @@ window.onload = function init(){
     program = initShaders(gl,"vertex-shader","fragment-shader");
     gl.useProgram(program);
 
+    // --- Shadow map setup ---
+    depthProgram = initShaders(gl,"depth-vertex-shader","depth-fragment-shader");
+
+    shadowTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SHADOW_SIZE, SHADOW_SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    var depthRenderBuffer = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, depthRenderBuffer);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, SHADOW_SIZE, SHADOW_SIZE);
+
+    shadowFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, shadowTexture, 0);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthRenderBuffer);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    gl.useProgram(program);
+    lightMVPLoc      = gl.getUniformLocation(program, "lightMVP");
+    receiveShadowLoc = gl.getUniformLocation(program, "receiveShadow");
+    shadowMapLoc     = gl.getUniformLocation(program, "shadowMap");
+    lightMVPDepthLoc = gl.getUniformLocation(depthProgram, "lightMVP");
+
     tetrahedron(va,vb,vc,vd,4);
 
     // Create sphere buffers once
@@ -299,7 +332,7 @@ function render(){
         orbitAngle       += 0.01  * speedMultiplier;
         brokenOrbitAngle += brokenOrbitSpeed * speedMultiplier;
         earthOrbitAngle  += earthOrbitSpeed * speedMultiplier;
-        cameraOrbitAngle += 0.008 * speedMultiplier;
+        cameraOrbitAngle += 0.01  * speedMultiplier;
         earthRotation    += earthRotationSpeed * speedMultiplier;
     }
 
@@ -314,10 +347,11 @@ function render(){
 
     // Camera
     if(viewMode === "moonOrbit"){
+        // Eye sits near the satellite, looking toward Earth
         eye = vec3(satelliteX + cameraOrbitRadius * Math.cos(cameraOrbitAngle),
                    satelliteY + cameraHeight,
                    satelliteZ + cameraOrbitRadius * Math.sin(cameraOrbitAngle));
-        at  = vec3(satelliteX, satelliteY, satelliteZ);
+        at  = vec3(earthX, earthY, earthZ);
         up  = vec3(0,1,0);
         projectionMatrix = ortho(left, right, bottom, ytop, near, far);
     } else {
@@ -331,10 +365,56 @@ function render(){
     modelViewMatrix = lookAt(eye, at, up);
     gl.uniformMatrix4fv(projectionMatrixLoc, false, flatten(projectionMatrix));
 
+    // --- Build lightMVP: orthographic projection from sun toward Earth ---
+    var lightDir = normalize(vec3(earthX - lightPosition[0], earthY - lightPosition[1], earthZ - lightPosition[2]));
+    var lightEye = vec3(lightPosition[0], lightPosition[1], lightPosition[2]);
+    var lightAt  = vec3(earthX, earthY, earthZ);
+    var lightUp  = vec3(0, 1, 0);
+    var lightView = lookAt(lightEye, lightAt, lightUp);
+    var lightProj = ortho(-15, 15, -15, 15, 1.0, 200.0);
+    var lightMVP  = mult(lightProj, lightView);
+
+    // Send lightMVP to main program
+    gl.useProgram(program);
+    gl.uniformMatrix4fv(lightMVPLoc, false, flatten(lightMVP));
+
+    // === SHADOW PASS: render satellite + broken piece from sun's POV ===
+    gl.useProgram(depthProgram);
+    gl.uniformMatrix4fv(lightMVPDepthLoc, false, flatten(lightMVP));
+    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFramebuffer);
+    gl.viewport(0, 0, SHADOW_SIZE, SHADOW_SIZE);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Draw satellite into shadow map
+    if(satelliteLoaded && satPoints.length > 0){
+        var depthPosLoc = gl.getAttribLocation(depthProgram, "vPosition");
+        gl.bindBuffer(gl.ARRAY_BUFFER, satPosBuffer);
+        gl.vertexAttribPointer(depthPosLoc, 4, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(depthPosLoc);
+        // Override lightMVP to include satellite model transform
+        var satDepthMVP = mult(lightMVP, translate(satelliteX, satelliteY, satelliteZ));
+        satDepthMVP = mult(satDepthMVP, scalem(satelliteScale, satelliteScale, satelliteScale));
+        gl.uniformMatrix4fv(lightMVPDepthLoc, false, flatten(satDepthMVP));
+        gl.drawArrays(gl.TRIANGLES, 0, satPoints.length);
+    }
+
+    // Restore framebuffer and viewport
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+
+    // Bind shadow map to texture unit 1 for main pass
+    gl.useProgram(program);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
+    gl.uniform1i(shadowMapLoc, 1);
+
+
+
     // Always disable reflection unless explicitly needed
     gl.uniform1i(useReflectionLoc, 0);
 
     //------------- Sun -------------
+    gl.uniform1i(receiveShadowLoc, 0);
     bindBuffer(spherePosBuffer,  "vPosition", 4);
     bindBuffer(sphereNormBuffer, "vNormal",   4);
     bindBuffer(sphereTexBuffer,  "vTexCoord", 2);
@@ -348,6 +428,7 @@ function render(){
     for(var i = 0; i < index; i += 3) gl.drawArrays(gl.TRIANGLES, i, 3);
 
     //------------- Earth -------------
+    gl.uniform1i(receiveShadowLoc, 1);
     bindBuffer(spherePosBuffer,  "vPosition", 4);
     bindBuffer(sphereNormBuffer, "vNormal",   4);
     bindBuffer(sphereTexBuffer,  "vTexCoord", 2);
@@ -370,6 +451,7 @@ function render(){
     for(var i = 0; i < index; i += 3) gl.drawArrays(gl.TRIANGLES, i, 3);
 
     //------------- Satellite -------------
+    gl.uniform1i(receiveShadowLoc, 0);
     if(satelliteLoaded && satPoints.length > 0){
 
         // Bind satellite's own buffers (isolated from sphere buffers)
@@ -397,6 +479,7 @@ function render(){
     }
 
     //------------- Broken Piece (orbits satellite) -------------
+    gl.uniform1i(receiveShadowLoc, 0);
     if(brokenLoaded && brokenPoints.length > 0){
 
         bindBuffer(brokenPosBuffer,  "vPosition", 4);
