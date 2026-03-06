@@ -13,6 +13,9 @@ var texCoordsArray = [];
 var earthTexture, moonTexture;
 var useTextureLoc;
 
+// Model data
+var satellite, satPoints = [], satNorms = [], satTexCoords = [];
+
 // Camera parameters
 var near = 0.1, far = 50;
 var left = -3, right = 3, ytop = 3, bottom = -3;
@@ -131,6 +134,20 @@ function configureTexture(image) {
 }
 
 //----------------------------------------------
+// Push data to webgl
+//----------------------------------------------
+function pushData(data, attName, dataSize = 4) {
+
+	let buffer = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+	gl.bufferData(gl.ARRAY_BUFFER, flatten(data), gl.STATIC_DRAW);
+
+	let attrib = gl.getAttribLocation(program, attName);
+	gl.vertexAttribPointer(attrib, dataSize, gl.FLOAT, false, 0, 0);
+	gl.enableVertexAttribArray(attrib);
+}
+
+//----------------------------------------------
 // Initialization
 //----------------------------------------------
 window.onload = function init(){
@@ -146,30 +163,6 @@ window.onload = function init(){
     gl.useProgram(program);
 
     tetrahedron(va,vb,vc,vd,numTimesToSubdivide);
-
-    // Vertex buffer
-    var vBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,vBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER,flatten(pointsArray),gl.STATIC_DRAW);
-    var vPosition = gl.getAttribLocation(program,"vPosition");
-    gl.vertexAttribPointer(vPosition,4,gl.FLOAT,false,0,0);
-    gl.enableVertexAttribArray(vPosition);
-
-    // Normal buffer
-    var nBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,nBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER,flatten(normalsArray),gl.STATIC_DRAW);
-    var vNormal = gl.getAttribLocation(program,"vNormal");
-    gl.vertexAttribPointer(vNormal,4,gl.FLOAT,false,0,0);
-    gl.enableVertexAttribArray(vNormal);
-
-    // Texture buffer
-    var tBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER,tBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER,flatten(texCoordsArray),gl.STATIC_DRAW);
-    var vTexCoord = gl.getAttribLocation(program,"vTexCoord");
-    gl.vertexAttribPointer(vTexCoord,2,gl.FLOAT,false,0,0);
-    gl.enableVertexAttribArray(vTexCoord);
 
     // Matrices
     modelViewMatrixLoc = gl.getUniformLocation(program,"modelViewMatrix");
@@ -191,7 +184,7 @@ window.onload = function init(){
     // Load Earth texture
     var earthImage = new Image();
     earthImage.crossOrigin = "anonymous";
-    earthImage.src = "earthmap1k.bmp";
+    earthImage.src = "./assets/earthmap1k.bmp";
     earthImage.onload = function(){
         earthTexture = configureTexture(earthImage);
         console.log("Earth texture loaded");
@@ -200,11 +193,22 @@ window.onload = function init(){
     // Load Moon texture
     var moonImage = new Image();
     moonImage.crossOrigin = "anonymous";
-    moonImage.src = "metal.bmp";
+    moonImage.src = "./assets/metal.bmp";
     moonImage.onload = function(){
         moonTexture = configureTexture(moonImage);
         console.log("Moon texture loaded");
     };
+
+    // Load satellite and populate relevant arrays
+    satellite = new Model(
+        "http://localhost:8083/assets/satellite.obj",
+        "http://localhost:8083/assets/satellite.mtl"
+    );
+    satellite.faces.forEach((face)=>{
+        satPoints.push(face.faceVertices);
+        satNorms.push(face.faceNormals);
+        satTexCoords.push(face.faceTexCoords);
+    });
 
     // Key controls
     window.addEventListener("keydown",function(event){
@@ -225,6 +229,11 @@ window.onload = function init(){
 //----------------------------------------------
 function render(){
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Push vertex, normal, and texture buffer
+    pushData(pointsArray, "vPosition");
+    pushData(normalsArray, "vNormal");
+    pushData(texCoordsArray, "vTexCoord", 2);
 
     if(!paused){
         orbitAngle += 0.01 * speedMultiplier;
@@ -294,6 +303,7 @@ function render(){
     //----------------------------------
     // Moon (TEXTURED)
     //----------------------------------
+    
     if(moonTexture){
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, moonTexture);
@@ -305,7 +315,31 @@ function render(){
     mvMoon = mult(mvMoon, scalem(smallSphereScale, smallSphereScale, smallSphereScale));
     gl.uniformMatrix4fv(modelViewMatrixLoc,false,flatten(mvMoon));
     gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"),flatten(vec4(1.0,1.0,1.0,1.0)));
-    for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
+    // for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
+    
 
+    //----------------------------------
+    // Satellite
+    //----------------------------------
+    // Push new vertex, normal, and texture buffer
+    if(satellite.objParsed && satellite.mtlParsed) {
+        if(satPoints.length == 0) {
+            satellite.faces.forEach((face)=>{
+                satPoints.push(face.faceVertices);
+                satNorms.push(face.faceNormals);
+                satTexCoords.push(face.faceTexCoords);
+            });
+        }
+        pushData(satPoints, "vPosition");
+        pushData(satNorms, "vNormal");
+        pushData(satTexCoords, "vTexCoord", 2);
+        gl.drawArrays( gl.TRIANGLES, 0, satPoints.length);
+    } else {
+        // render moon
+        for(var i=0;i<index;i+=3) gl.drawArrays(gl.TRIANGLES,i,3);
+    }
+
+
+    
     requestAnimationFrame(render);
 }
