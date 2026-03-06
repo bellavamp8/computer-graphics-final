@@ -56,16 +56,20 @@ uniform bool useReflection;
 
 void main()
 {
-    vec4 baseColor = texture2D(tex0, fTexCoord);
+    vec4 baseColor;
+    if(useTexture) {
+        baseColor = texture2D(tex0, fTexCoord);
+    } else {
+        baseColor = vec4(0.8, 0.8, 0.8, 1.0); // fallback grey
+    }
+
     vec4 finalColor = baseColor;
 
     if(useReflection){
-        // Convert reflection vector to spherical coordinates
         float u = 0.5 + atan(fReflectDir.z, fReflectDir.x) / (2.0 * 3.14159265);
         float v = 0.5 - asin(fReflectDir.y) / 3.14159265;
-
         vec4 reflectedColor = texture2D(earthTex, vec2(u,v));
-        finalColor = mix(baseColor, reflectedColor, 0.7); // Mirror effect
+        finalColor = mix(baseColor, reflectedColor, 0.7);
     }
 
     gl_FragColor = fColor * finalColor;
