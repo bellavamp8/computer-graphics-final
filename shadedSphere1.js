@@ -38,7 +38,7 @@ var orbitRadius = 8.0;          // Satellite orbit radius
 
 // Broken piece orbital parameters (orbits the satellite)
 var brokenOrbitAngle = 0;
-var brokenOrbitRadius = 0.3;    // Tight orbit around the satellite
+var brokenOrbitRadius = 0.8;    // Tight orbit around the satellite
 var brokenOrbitSpeed = 0.03;    // Faster than satellite orbit
 var brokenScale = 0.05;
 
@@ -358,7 +358,7 @@ function render(){
         eye = vec3(0, 40, 0);
         at  = vec3(0, 0, 0);
         up  = vec3(0, 0, -1);
-        var scale = 70;
+        var scale = 50;
         projectionMatrix = ortho(-scale, scale, -scale, scale, near, 200);
     }
 
