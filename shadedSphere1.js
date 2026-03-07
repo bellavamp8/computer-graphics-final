@@ -185,7 +185,6 @@ function configureCubeMap() {
 
 function configureCubeMapImage(image) {
     cubeMap = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMap);
 
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -201,7 +200,6 @@ function configureCubeMapImage(image) {
     gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
     gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
 
-    gl.uniform1i(gl.getUniformLocation(program, "texMap"), 1);
     return cubeMap;
 }
 
@@ -552,9 +550,15 @@ function render(){
         bindBuffer(brokenNormBuffer, "vNormal",   4);
         bindBuffer(sphereTexBuffer,  "vTexCoord", 2);
 
-        if(metalTexture){
+        if(metalTexture && reflectionMode == 0){
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, metalTexture);
+            gl.uniform1i(gl.getUniformLocation(program,"tex0"), 0);
+            gl.uniform1i(useTextureLoc, 1);
+        } else if(reflectionMode > 0) {
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_CUBE_MAP, reflectionTexture);
+            // gl.uniform1i(gl.getUniformLocation(program,"cubeMapTex"), 0);
             gl.uniform1i(gl.getUniformLocation(program,"tex0"), 0);
             gl.uniform1i(useTextureLoc, 1);
         } else {
