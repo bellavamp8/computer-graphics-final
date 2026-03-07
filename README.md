@@ -1,5 +1,10 @@
 # computer-graphics-final
 
+To start:
+python -m http.server 8000
+
+Then go to localhost:8000
+
 
 Use spacebar to pause orbits, up arrow to speed up orbits, down arrow to slow down orbits
 "B" for birds-eye view of Earth orbit, "M" for original view

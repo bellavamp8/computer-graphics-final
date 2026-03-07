@@ -40,7 +40,11 @@ var orbitRadius = 8.0;          // Satellite orbit radius
 var brokenOrbitAngle = 0;
 var brokenOrbitRadius = 0.8;    // Tight orbit around the satellite
 var brokenOrbitSpeed = 0.03;    // Faster than satellite orbit
-var brokenScale = 0.05;
+var brokenScale = 0.1;
+
+// Broken piece tumble (angled spin over time)
+var brokenTilt = 0;
+var brokenTiltSpeed = 0.02;     // Tumble speed in radians/frame
 
 // Camera orbit
 var cameraOrbitAngle = 0;
@@ -162,8 +166,7 @@ function bindBuffer(buffer, attName, dataSize) {
 }
 
 //----------------------------------------------
-// Try to build satellite buffers from satellite.faces
-// Called every frame until it succeeds once
+// Poll for satellite geometry
 //----------------------------------------------
 function trySatelliteLoad() {
     if(satelliteLoaded) return;
@@ -226,15 +229,15 @@ window.onload = function init(){
     gl = WebGLUtils.setupWebGL(canvas);
     if(!gl){ alert("WebGL isn't available"); }
 
-    gl.viewport(0,0,canvas.width,canvas.height);
-    gl.clearColor(0,0,0,1);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.clearColor(0, 0, 0, 1);
     gl.enable(gl.DEPTH_TEST);
 
-    program = initShaders(gl,"vertex-shader","fragment-shader");
+    program = initShaders(gl, "vertex-shader", "fragment-shader");
     gl.useProgram(program);
 
     // --- Shadow map setup ---
-    depthProgram = initShaders(gl,"depth-vertex-shader","depth-fragment-shader");
+    depthProgram = initShaders(gl, "depth-vertex-shader", "depth-fragment-shader");
 
     shadowTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
@@ -260,7 +263,7 @@ window.onload = function init(){
     shadowMapLoc     = gl.getUniformLocation(program, "shadowMap");
     lightMVPDepthLoc = gl.getUniformLocation(depthProgram, "lightMVP");
 
-    tetrahedron(va,vb,vc,vd,4);
+    tetrahedron(va, vb, vc, vd, 4);
 
     // Create sphere buffers once
     spherePosBuffer  = createBuffer(pointsArray, 4);
@@ -274,14 +277,14 @@ window.onload = function init(){
     useReflectionLoc    = gl.getUniformLocation(program, "useReflection");
 
     // Lighting uniforms
-    gl.uniform4fv(gl.getUniformLocation(program,"lightDiffuse"),    flatten(lightDiffuse));
-    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(materialDiffuse));
-    gl.uniform4fv(gl.getUniformLocation(program,"lightSpecular"),   flatten(lightSpecular));
-    gl.uniform4fv(gl.getUniformLocation(program,"materialSpecular"),flatten(materialSpecular));
-    gl.uniform4fv(gl.getUniformLocation(program,"lightAmbient"),    flatten(lightAmbient));
-    gl.uniform4fv(gl.getUniformLocation(program,"materialAmbient"), flatten(materialAmbient));
-    gl.uniform4fv(gl.getUniformLocation(program,"lightPosition"),   flatten(vec4(lightPosition[0],lightPosition[1],lightPosition[2],0.0)));
-    gl.uniform1f (gl.getUniformLocation(program,"shininess"),       materialShininess);
+    gl.uniform4fv(gl.getUniformLocation(program,"lightDiffuse"),     flatten(lightDiffuse));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"),  flatten(materialDiffuse));
+    gl.uniform4fv(gl.getUniformLocation(program,"lightSpecular"),    flatten(lightSpecular));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialSpecular"), flatten(materialSpecular));
+    gl.uniform4fv(gl.getUniformLocation(program,"lightAmbient"),     flatten(lightAmbient));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialAmbient"),  flatten(materialAmbient));
+    gl.uniform4fv(gl.getUniformLocation(program,"lightPosition"),    flatten(vec4(lightPosition[0],lightPosition[1],lightPosition[2],0.0)));
+    gl.uniform1f (gl.getUniformLocation(program,"shininess"),        materialShininess);
 
     // Reflection off by default
     gl.uniform1i(useReflectionLoc, 0);
@@ -297,21 +300,18 @@ window.onload = function init(){
     metalImage.src = "./assets/metal.bmp";
     metalImage.onload = function(){ metalTexture = configureTexture(metalImage); };
 
-    // Load satellite - we poll satellite.faces in render() to avoid
-    // the race condition where loadCallback fires before we assign it
-    satellite = new Model("./assets/satellite.obj","./assets/satellite.mtl");
-
-    // Load broken piece using same polling approach
-    brokenPiece = new Model("./assets/satellite_piece.obj","./assets/satellite_piece.mtl");
+    // Load satellite OBJ models
+    satellite  = new Model("./assets/satellite2.obj", "./assets/satellite.mtl");
+    brokenPiece = new Model("./assets/satellite_piece.obj", "./assets/satellite_broken.mtl");
 
     // Controls
     window.addEventListener("keydown", function(event){
         switch(event.code){
-            case "Space":    paused = !paused;              break;
-            case "ArrowUp":  speedMultiplier *= 1.5;        break;
-            case "ArrowDown":speedMultiplier /= 1.5;        break;
-            case "KeyB":     viewMode = "topDown";          break;
-            case "KeyM":     viewMode = "moonOrbit";        break;
+            case "Space":     paused = !paused;              break;
+            case "ArrowUp":   speedMultiplier *= 1.5;        break;
+            case "ArrowDown": speedMultiplier /= 1.5;        break;
+            case "KeyB":      viewMode = "topDown";          break;
+            case "KeyM":      viewMode = "moonOrbit";        break;
         }
     });
 
@@ -330,8 +330,9 @@ function render(){
 
     if(!paused){
         orbitAngle       += 0.01  * speedMultiplier;
-        brokenOrbitAngle += brokenOrbitSpeed * speedMultiplier;
-        earthOrbitAngle  += earthOrbitSpeed * speedMultiplier;
+        brokenOrbitAngle += brokenOrbitSpeed  * speedMultiplier;
+        brokenTilt       += brokenTiltSpeed   * speedMultiplier;  // tumble
+        earthOrbitAngle  += earthOrbitSpeed   * speedMultiplier;
         cameraOrbitAngle += 0.01  * speedMultiplier;
         earthRotation    += earthRotationSpeed * speedMultiplier;
     }
@@ -347,12 +348,13 @@ function render(){
 
     // Camera
     if(viewMode === "moonOrbit"){
-        // Eye sits near the satellite, looking toward Earth
-        eye = vec3(satelliteX + cameraOrbitRadius * Math.cos(cameraOrbitAngle),
-                   satelliteY + cameraHeight,
-                   satelliteZ + cameraOrbitRadius * Math.sin(cameraOrbitAngle));
+        eye = vec3(
+            satelliteX + cameraOrbitRadius * Math.cos(cameraOrbitAngle),
+            satelliteY + cameraHeight,
+            satelliteZ + cameraOrbitRadius * Math.sin(cameraOrbitAngle)
+        );
         at  = vec3(earthX, earthY, earthZ);
-        up  = vec3(0,1,0);
+        up  = vec3(0, 1, 0);
         projectionMatrix = ortho(left, right, bottom, ytop, near, far);
     } else {
         eye = vec3(0, 40, 0);
@@ -366,7 +368,6 @@ function render(){
     gl.uniformMatrix4fv(projectionMatrixLoc, false, flatten(projectionMatrix));
 
     // --- Build lightMVP: orthographic projection from sun toward Earth ---
-    var lightDir = normalize(vec3(earthX - lightPosition[0], earthY - lightPosition[1], earthZ - lightPosition[2]));
     var lightEye = vec3(lightPosition[0], lightPosition[1], lightPosition[2]);
     var lightAt  = vec3(earthX, earthY, earthZ);
     var lightUp  = vec3(0, 1, 0);
@@ -391,7 +392,6 @@ function render(){
         gl.bindBuffer(gl.ARRAY_BUFFER, satPosBuffer);
         gl.vertexAttribPointer(depthPosLoc, 4, gl.FLOAT, false, 0, 0);
         gl.enableVertexAttribArray(depthPosLoc);
-        // Override lightMVP to include satellite model transform
         var satDepthMVP = mult(lightMVP, translate(satelliteX, satelliteY, satelliteZ));
         satDepthMVP = mult(satDepthMVP, scalem(satelliteScale, satelliteScale, satelliteScale));
         gl.uniformMatrix4fv(lightMVPDepthLoc, false, flatten(satDepthMVP));
@@ -408,8 +408,6 @@ function render(){
     gl.bindTexture(gl.TEXTURE_2D, shadowTexture);
     gl.uniform1i(shadowMapLoc, 1);
 
-
-
     // Always disable reflection unless explicitly needed
     gl.uniform1i(useReflectionLoc, 0);
 
@@ -423,7 +421,7 @@ function render(){
     gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(0.9412, 0.7725, 0.0941, 1)));
 
     var mvSun = mult(modelViewMatrix, translate(lightPosition[0], lightPosition[1], lightPosition[2]));
-    mvSun = mult(mvSun, scalem(5,5,5));
+    mvSun = mult(mvSun, scalem(5, 5, 5));
     gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvSun));
     for(var i = 0; i < index; i += 3) gl.drawArrays(gl.TRIANGLES, i, 3);
 
@@ -442,7 +440,7 @@ function render(){
         gl.uniform1i(useTextureLoc, 0);
     }
 
-    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(1,1,1,1)));
+    gl.uniform4fv(gl.getUniformLocation(program,"materialDiffuse"), flatten(vec4(1, 1, 1, 1)));
 
     var mvEarth = mult(modelViewMatrix, translate(earthX, earthY, earthZ));
     mvEarth = mult(mvEarth, rotateY(earthRotation));
@@ -454,12 +452,10 @@ function render(){
     gl.uniform1i(receiveShadowLoc, 0);
     if(satelliteLoaded && satPoints.length > 0){
 
-        // Bind satellite's own buffers (isolated from sphere buffers)
-        bindBuffer(satPosBuffer,  "vPosition", 4);
-        bindBuffer(satNormBuffer, "vNormal",   4);
-        bindBuffer(sphereTexBuffer, "vTexCoord", 2); // use sphere UVs for metal texture mapping
+        bindBuffer(satPosBuffer,    "vPosition", 4);
+        bindBuffer(satNormBuffer,   "vNormal",   4);
+        bindBuffer(sphereTexBuffer, "vTexCoord", 2);
 
-        // Bind metal texture
         if(metalTexture){
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, metalTexture);
@@ -474,11 +470,10 @@ function render(){
         var mvSatellite = mult(modelViewMatrix, translate(satelliteX, satelliteY, satelliteZ));
         mvSatellite = mult(mvSatellite, scalem(satelliteScale, satelliteScale, satelliteScale));
         gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvSatellite));
-
         gl.drawArrays(gl.TRIANGLES, 0, satPoints.length);
     }
 
-    //------------- Broken Piece (orbits satellite) -------------
+    //------------- Broken Piece (orbits satellite, tumbles at an angle) -------------
     gl.uniform1i(receiveShadowLoc, 0);
     if(brokenLoaded && brokenPoints.length > 0){
 
@@ -486,7 +481,6 @@ function render(){
         bindBuffer(brokenNormBuffer, "vNormal",   4);
         bindBuffer(sphereTexBuffer,  "vTexCoord", 2);
 
-        // Use metal texture for the broken piece too
         if(metalTexture){
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, metalTexture);
@@ -502,7 +496,12 @@ function render(){
         var brokenZ = satelliteZ + brokenOrbitRadius * Math.sin(brokenOrbitAngle);
         var brokenY = satelliteY;
 
+        // Convert brokenTilt (radians) to degrees for MV library
+        var tiltDeg = brokenTilt * (180.0 / Math.PI);
+
         var mvBroken = mult(modelViewMatrix, translate(brokenX, brokenY, brokenZ));
+        mvBroken = mult(mvBroken, rotateX(tiltDeg));           // primary tumble axis
+        mvBroken = mult(mvBroken, rotateZ(tiltDeg * 0.7));     // off-axis spin for natural tumble
         mvBroken = mult(mvBroken, scalem(brokenScale, brokenScale, brokenScale));
         gl.uniformMatrix4fv(modelViewMatrixLoc, false, flatten(mvBroken));
 
