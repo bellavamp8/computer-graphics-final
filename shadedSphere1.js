@@ -80,9 +80,19 @@ var eye, at = vec3(0,0,0), up = vec3(0,1,0);
 var paused = false;
 var speedMultiplier = 1.0;
 var viewMode = "moonOrbit";
+var reflectionMode = 0      // 0 -> off, 1 -> reflection, 2 -> refraction
 
 // Textures
-var earthTexture, metalTexture;
+var earthTexture, metalTexture, reflectionTexture;
+var cubeMap;
+
+// colors
+var red = new Uint8Array([255, 0, 0, 255]);
+var green = new Uint8Array([0, 255, 0, 255]);
+var blue = new Uint8Array([0, 0, 255, 255]);
+var cyan = new Uint8Array([0, 255, 255, 255]);
+var magenta = new Uint8Array([255, 0, 255, 255]);
+var yellow = new Uint8Array([255, 255, 0, 255]);
 
 // Shadow mapping
 var shadowFramebuffer, shadowTexture;
@@ -145,6 +155,54 @@ function configureTexture(image) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return tex;
+}
+
+//----------------------------------------------
+// Cube Map
+//----------------------------------------------
+function configureCubeMap() {
+    cubeMap = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMap);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, red);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, yellow);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, green);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, cyan);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, blue);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, magenta);
+
+    gl.uniform1i(gl.getUniformLocation(program, "texMap"), 0);
+    return cubeMap;
+}
+
+
+function configureCubeMapImage(image) {
+    cubeMap = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, cubeMap);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_X, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+    gl.texImage2D(gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, image);
+
+    gl.uniform1i(gl.getUniformLocation(program, "texMap"), 1);
+    return cubeMap;
 }
 
 //----------------------------------------------
@@ -301,17 +359,28 @@ window.onload = function init(){
     metalImage.onload = function(){ metalTexture = configureTexture(metalImage); };
 
     // Load satellite OBJ models
-    satellite  = new Model("./assets/satellite2.obj", "./assets/satellite.mtl");
-    brokenPiece = new Model("./assets/satellite_piece.obj", "./assets/satellite_broken.mtl");
+    satellite  = new Model("./assets/satellite2.obj", "./assets/satellite2.mtl");
+    brokenPiece = new Model("./assets/satellite_piece.obj", "./assets/satellite_piece.mtl");
+
+    // Configure CubeMap Image    
+    configureCubeMap();
+    var reflectionImage = new Image();
+    reflectionImage.crossOrigin = "anonymous";
+    reflectionImage.src = "./assets/earthMapSquare.bmp";
+    reflectionImage.onload = function(){ reflectionTexture = configureCubeMapImage(reflectionImage); };
+
 
     // Controls
     window.addEventListener("keydown", function(event){
         switch(event.code){
-            case "Space":     paused = !paused;              break;
-            case "ArrowUp":   speedMultiplier *= 1.5;        break;
-            case "ArrowDown": speedMultiplier /= 1.5;        break;
-            case "KeyB":      viewMode = "topDown";          break;
-            case "KeyM":      viewMode = "moonOrbit";        break;
+            case "Space":     paused = !paused;         break;
+            case "ArrowUp":   speedMultiplier *= 1.5;   break;
+            case "ArrowDown": speedMultiplier /= 1.5;   break;
+            case "KeyB":      viewMode = "topDown";     break;
+            case "KeyM":      viewMode = "moonOrbit";   break;
+            case "KeyZ":      reflectionMode = 0;       break;  // normal rendering
+            case "KeyX":      reflectionMode = 1;       break;  // reflection
+            case "KeyC":      reflectionMode = 2;       break;  // refraction
         }
     });
 
@@ -475,6 +544,8 @@ function render(){
 
     //------------- Broken Piece (orbits satellite, tumbles at an angle) -------------
     gl.uniform1i(receiveShadowLoc, 0);
+    gl.uniform1i(useReflectionLoc, reflectionMode);
+
     if(brokenLoaded && brokenPoints.length > 0){
 
         bindBuffer(brokenPosBuffer,  "vPosition", 4);

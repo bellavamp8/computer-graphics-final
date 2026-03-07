@@ -20,6 +20,8 @@ uniform vec4 materialDiffuse, materialSpecular, materialAmbient;
 uniform float shininess;
 uniform vec4 lightPosition;
 
+uniform int useReflection;
+
 void main()
 {
     vec4 posMV = modelViewMatrix * vPosition;
@@ -35,7 +37,9 @@ void main()
     fColor = diffuse + specular + ambient;
 
     // Reflection vector
-    fReflectDir = vec3(0.0);
+    if(useReflection == 0)      { fReflectDir = vec3(0.0); }
+    else if(useReflection == 1) { fReflectDir = reflect(posMV.xyz, N); }
+    else if(useReflection == 2) { fReflectDir = refract(posMV.xyz, N, 0.66); }
 
     // Position in light clip space for shadow mapping
     fPosLightSpace = lightMVP * vPosition;
@@ -53,10 +57,10 @@ varying vec2 fTexCoord;
 varying vec3 fReflectDir;
 varying vec4 fPosLightSpace;
 
-uniform sampler2D tex0;
+uniform samplerCube cubeMapTex;// cube map texture
+uniform sampler2D tex0;        // object texture 
 uniform sampler2D shadowMap;   // Depth texture from sun's POV
 uniform bool useTexture;
-uniform bool useReflection;
 uniform bool receiveShadow;    // Only Earth receives the satellite shadow
 
 float shadowFactor()
