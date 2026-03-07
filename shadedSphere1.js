@@ -302,7 +302,7 @@ window.onload = function init(){
     satellite = new Model("./assets/satellite.obj","./assets/satellite.mtl");
 
     // Load broken piece using same polling approach
-    brokenPiece = new Model("./assets/satellite_broken.obj","./assets/satellite_broken.mtl");
+    brokenPiece = new Model("./assets/satellite_piece.obj","./assets/satellite_piece.mtl");
 
     // Controls
     window.addEventListener("keydown", function(event){
